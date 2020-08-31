@@ -8,6 +8,7 @@ import com.george.pubsub.thiroros.util.ChordUtils;
 import com.george.pubsub.thiroros.util.DistributedNode;
 import com.george.pubsub.thiroros.util.ThirorosResponse;
 import com.george.pubsub.util.RemoteAddress;
+import com.george.pubsub.util.RemoteSubscriber;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -79,11 +80,13 @@ public class DistributedBroker implements DistributedBrokerable {
     }
 
     @Override
-    public synchronized DistributedBrokerResponse subscribe(String topic, Receivable receivable) {
+    public synchronized DistributedBrokerResponse subscribe(String topic, RemoteAddress remoteSubscriber) {
         try {
             int id = ChordUtils.computeId(topic);
             if (checkRange(id)) {
-                broker.subscribe(topic, receivable);
+                RemoteSubscriber subscriber = new RemoteSubscriber(remoteSubscriber);
+                subscriber.setMapper(mapper);
+                broker.subscribe(topic, subscriber);
                 return DistributedBrokerResponse.OK;
             }
         } catch (NoSuchAlgorithmException | UnsupportedEncodingException e) {
