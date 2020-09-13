@@ -38,7 +38,6 @@ public class DistributedBroker implements DistributedBrokerable {
     private ObjectMapper mapper;
     private int idFrom;
     private int idTo;
-    private int numberOfRetries = 0;
     @Value("${max-retries:3}")
     private int maxRetries;
 
@@ -125,6 +124,10 @@ public class DistributedBroker implements DistributedBrokerable {
     }
 
     public synchronized void register() {
+        register(0);
+    }
+
+    private void register(int numberOfRetries) {
         try {
             logger.info("registering node {}", nodeAddress);
             Optional<ThirorosResponse> thirorosResponse = join();
