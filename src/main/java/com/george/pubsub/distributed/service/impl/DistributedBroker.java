@@ -144,28 +144,28 @@ public class DistributedBroker implements DistributedBrokerable {
             if (previousNode == null) {
                 idTo = idFrom - 1;
                 logger.info("no previous node");
-                logger.info("registering completed for node {}", nodeAddress);
-                return;
-            }
-            Optional<DistributedNodeTopics> distributedNodeTopics = getTopics(previousNode);
-            if (distributedNodeTopics.isEmpty()) {
-                logger.info("no response from previous node, aborting...");
-                return;
-            }
-            if (distributedNodeTopics.get().getDistributedBrokerResponse() != DistributedBrokerResponse.OK) {
-                logger.info("previous node response {}", distributedNodeTopics.get().getDistributedBrokerResponse());
-                if (numberOfRetries < maxRetries) {
-                    logger.info("retrying...");
-                    numberOfRetries++;
-                    register();
-                } else {
-                    logger.info("max retries reached, aborting...");
+            } else {
+                Optional<DistributedNodeTopics> distributedNodeTopics = getTopics(previousNode);
+                if (distributedNodeTopics.isEmpty()) {
+                    logger.info("no response from previous node, aborting...");
                     return;
                 }
+                if (distributedNodeTopics.get().getDistributedBrokerResponse() != DistributedBrokerResponse.OK) {
+                    logger.info("previous node response {}", distributedNodeTopics.get().getDistributedBrokerResponse());
+                    if (numberOfRetries < maxRetries) {
+                        logger.info("retrying...");
+                        numberOfRetries++;
+                        register();
+                    } else {
+                        logger.info("max retries reached, aborting...");
+                        return;
+                    }
+                }
+                idTo = distributedNodeTopics.get().getToId();
+                Map<String, Set<Receivable>> topics = distributedNodeTopics.get().getTopics();
+                setTopics(topics);
             }
-            idTo = distributedNodeTopics.get().getToId();
-            Map<String, Set<Receivable>> topics = distributedNodeTopics.get().getTopics();
-            setTopics(topics);
+
             logger.info("registering completed for node {}", nodeAddress);
 
         } catch (IOException | InterruptedException e) {
