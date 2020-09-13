@@ -43,16 +43,12 @@ public class DistributedBroker implements DistributedBrokerable {
 
     @Autowired
     public DistributedBroker(@Value("${server.ip}") String nodeIp, @Value("${server.port}") int nodePort) {
-        this("localhost", 50000, nodeIp, nodePort);
+        this(nodeIp, nodePort, "localhost", 50000);
     }
 
-    public DistributedBroker(String thirorosIp, int thirorosPort, String nodeIp, int nodePort) {
-        thirorosAddress = new RemoteAddress();
-        thirorosAddress.setIp(thirorosIp);
-        thirorosAddress.setPort(thirorosPort);
-        nodeAddress = new RemoteAddress();
-        nodeAddress.setIp(nodeIp);
-        nodeAddress.setPort(nodePort);
+    public DistributedBroker(String nodeIp, int nodePort, String thirorosIp, int thirorosPort) {
+        nodeAddress = new RemoteAddress(nodeIp, nodePort);
+        thirorosAddress = new RemoteAddress(thirorosIp, thirorosPort);
         mapper = new ObjectMapper();
         broker = new InnerBroker();
         logger.info("created new distributed broker {} with thiroros {}", nodeAddress, thirorosAddress);
@@ -76,7 +72,7 @@ public class DistributedBroker implements DistributedBrokerable {
     @Override
     public DistributedBrokerResponse publish(String topic, String text) {
         Message message = new Message(topic, text);
-        return this.publish(message);
+        return publish(message);
     }
 
     @Override
@@ -96,13 +92,35 @@ public class DistributedBroker implements DistributedBrokerable {
     }
 
     @Override
-    public DistributedNodeTopics getTopics(int id) {
-        return broker.getTopics(id);
+    public synchronized DistributedNodeTopics getTopics(int id) {
+        Map<String, Set<Receivable>> topics = new HashMap<>();
+        DistributedNodeTopics distributedNodeTopics = new DistributedNodeTopics();
+        distributedNodeTopics.setToId(idTo);
+        distributedNodeTopics.setTopics(topics);
+        if (!checkRange(id)) {
+            distributedNodeTopics.setDistributedBrokerResponse(DistributedBrokerResponse.INVALIDATE_CACHE);
+            return distributedNodeTopics;
+        }
+        try {
+            for (String topic : broker.getSubscribers().keySet()) {
+                int topicId = ChordUtils.computeId(topic);
+                if (topicId >= id) {
+                    topics.put(topic, broker.getSubscribers().get(topic));
+                }
+            }
+            idTo = id - 1;
+            distributedNodeTopics.setDistributedBrokerResponse(DistributedBrokerResponse.OK);
+        } catch (NoSuchAlgorithmException | UnsupportedEncodingException e) {
+            e.printStackTrace();
+        }
+        return distributedNodeTopics;
     }
 
     @Override
-    public void setTopics(Map<String, Set<Receivable>> topics) {
-        broker.setTopics(topics);
+    public synchronized void setTopics(Map<String, Set<Receivable>> topics) {
+        for (String topic : topics.keySet()) {
+            broker.getSubscribers().put(topic, topics.get(topic));
+        }
     }
 
     public synchronized void register() {
@@ -143,7 +161,7 @@ public class DistributedBroker implements DistributedBrokerable {
             }
             idTo = distributedNodeTopics.get().getToId();
             Map<String, Set<Receivable>> topics = distributedNodeTopics.get().getTopics();
-            broker.setTopics(topics);
+            setTopics(topics);
             logger.info("registering completed for node {}", nodeAddress);
 
         } catch (IOException | InterruptedException e) {
@@ -214,34 +232,8 @@ public class DistributedBroker implements DistributedBrokerable {
 
     private class InnerBroker extends Broker {
 
-        public synchronized DistributedNodeTopics getTopics(int id) {
-            Map<String, Set<Receivable>> topics = new HashMap<>();
-            DistributedNodeTopics distributedNodeTopics = new DistributedNodeTopics();
-            distributedNodeTopics.setToId(idTo);
-            distributedNodeTopics.setTopics(topics);
-            if (!checkRange(id)) {
-                distributedNodeTopics.setDistributedBrokerResponse(DistributedBrokerResponse.INVALIDATE_CACHE);
-                return distributedNodeTopics;
-            }
-            try {
-                for (String topic : subscribers.keySet()) {
-                    int topicId = ChordUtils.computeId(topic);
-                    if (topicId >= id) {
-                        topics.put(topic, subscribers.get(topic));
-                    }
-                }
-                idTo = id - 1;
-                distributedNodeTopics.setDistributedBrokerResponse(DistributedBrokerResponse.OK);
-            } catch (NoSuchAlgorithmException | UnsupportedEncodingException e) {
-                e.printStackTrace();
-            }
-            return distributedNodeTopics;
-        }
-
-        public synchronized void setTopics(Map<String, Set<Receivable>> topics) {
-            for (String topic : topics.keySet()) {
-                subscribers.put(topic, topics.get(topic));
-            }
+        public Map<String, Set<Receivable>> getSubscribers() {
+            return subscribers;
         }
 
     }
