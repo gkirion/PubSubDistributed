@@ -38,8 +38,9 @@ public class DistributedBroker implements DistributedBrokerable {
     private ObjectMapper mapper;
     private int idFrom;
     private int idTo;
-    int numberOfRetries = 0;
-    int maxRetries = 3;
+    private int numberOfRetries = 0;
+    @Value("${max-retries:3}")
+    private int maxRetries;
 
     @Autowired
     public DistributedBroker(@Value("${server.ip}") String nodeIp, @Value("${server.port}") int nodePort) {
