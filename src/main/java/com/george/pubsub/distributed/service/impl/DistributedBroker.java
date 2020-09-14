@@ -18,6 +18,7 @@ import pubsub.broker.Broker;
 import pubsub.broker.Message;
 import pubsub.broker.Receivable;
 
+import javax.annotation.PostConstruct;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
@@ -52,7 +53,6 @@ public class DistributedBroker implements DistributedBrokerable {
         mapper = new ObjectMapper();
         broker = new InnerBroker();
         logger.info("created new distributed broker {} with thiroros {}", nodeAddress, thirorosAddress);
-        register();
     }
 
     @Override
@@ -123,12 +123,14 @@ public class DistributedBroker implements DistributedBrokerable {
         }
     }
 
+    @PostConstruct
     public synchronized void register() {
         register(0);
     }
 
     private void register(int numberOfRetries) {
         try {
+            System.out.println(maxRetries);
             logger.info("registering node {}", nodeAddress);
             Optional<ThirorosResponse> thirorosResponse = join();
             if (thirorosResponse.isEmpty()) {
