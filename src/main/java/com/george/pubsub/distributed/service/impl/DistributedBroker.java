@@ -1,6 +1,8 @@
 package com.george.pubsub.distributed.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.george.pubsub.distributed.exceptions.DistributedNodeException;
+import com.george.pubsub.distributed.exceptions.ThirorosException;
 import com.george.pubsub.distributed.service.DistributedBrokerable;
 import com.george.pubsub.distributed.util.DistributedBrokerResponse;
 import com.george.pubsub.distributed.util.DistributedNodeTopics;
@@ -62,11 +64,12 @@ public class DistributedBroker implements DistributedBrokerable {
             if (checkRange(id)) {
                 broker.publish(message);
                 return DistributedBrokerResponse.OK;
+            } else {
+                return DistributedBrokerResponse.INVALID_ID;
             }
         } catch (NoSuchAlgorithmException | UnsupportedEncodingException e) {
-            e.printStackTrace();
+            return DistributedBrokerResponse.SERVER_ERROR;
         }
-        return DistributedBrokerResponse.INVALIDATE_CACHE;
     }
 
     @Override
@@ -84,11 +87,12 @@ public class DistributedBroker implements DistributedBrokerable {
                 subscriber.setMapper(mapper);
                 broker.subscribe(topic, subscriber);
                 return DistributedBrokerResponse.OK;
+            } else {
+                return DistributedBrokerResponse.INVALID_ID;
             }
         } catch (NoSuchAlgorithmException | UnsupportedEncodingException e) {
-            e.printStackTrace();
+            return DistributedBrokerResponse.SERVER_ERROR;
         }
-        return DistributedBrokerResponse.INVALIDATE_CACHE;
     }
 
     @Override
@@ -98,7 +102,7 @@ public class DistributedBroker implements DistributedBrokerable {
         distributedNodeTopics.setToId(idTo);
         distributedNodeTopics.setTopics(topics);
         if (!checkRange(id)) {
-            distributedNodeTopics.setDistributedBrokerResponse(DistributedBrokerResponse.INVALIDATE_CACHE);
+            distributedNodeTopics.setDistributedBrokerResponse(DistributedBrokerResponse.INVALID_ID);
             return distributedNodeTopics;
         }
         try {
@@ -111,7 +115,8 @@ public class DistributedBroker implements DistributedBrokerable {
             idTo = id - 1;
             distributedNodeTopics.setDistributedBrokerResponse(DistributedBrokerResponse.OK);
         } catch (NoSuchAlgorithmException | UnsupportedEncodingException e) {
-            e.printStackTrace();
+            distributedNodeTopics.setDistributedBrokerResponse(DistributedBrokerResponse.SERVER_ERROR);
+            return distributedNodeTopics;
         }
         return distributedNodeTopics;
     }
@@ -124,84 +129,80 @@ public class DistributedBroker implements DistributedBrokerable {
     }
 
     @PostConstruct
-    public synchronized void register() {
-        register(0);
-    }
+    private void register() throws ThirorosException, DistributedNodeException {
+        logger.info("registering node {}", nodeAddress);
 
-    private void register(int numberOfRetries) {
-        try {
-            System.out.println(maxRetries);
-            logger.info("registering node {}", nodeAddress);
-            Optional<ThirorosResponse> thirorosResponse = join();
-            if (thirorosResponse.isEmpty()) {
-                logger.info("no response from thiroros, aborting...");
-                return;
-            }
-            if (thirorosResponse.get().getThirorosResponse() != ThirorosResponse.Response.OK) {
-                logger.info("thiroros response {} , aborting...", thirorosResponse.get().getThirorosResponse());
-                return;
-            }
-            idFrom = thirorosResponse.get().getNodeId();
-            DistributedNode previousNode = thirorosResponse.get().getPreviousNode();
-            if (previousNode == null) {
-                idTo = idFrom - 1;
-                logger.info("no previous node");
-            } else {
-                Optional<DistributedNodeTopics> distributedNodeTopics = getTopics(previousNode);
-                if (distributedNodeTopics.isEmpty()) {
-                    logger.info("no response from previous node, aborting...");
-                    return;
-                }
-                if (distributedNodeTopics.get().getDistributedBrokerResponse() != DistributedBrokerResponse.OK) {
-                    logger.info("previous node response {}", distributedNodeTopics.get().getDistributedBrokerResponse());
-                    if (numberOfRetries < maxRetries) {
-                        logger.info("retrying...");
-                        numberOfRetries++;
-                        register();
-                    } else {
-                        logger.info("max retries reached, aborting...");
-                        return;
-                    }
-                }
-                idTo = distributedNodeTopics.get().getToId();
-                Map<String, Set<Receivable>> topics = distributedNodeTopics.get().getTopics();
-                setTopics(topics);
-            }
-
-            logger.info("registering completed for node {}", nodeAddress);
-
-        } catch (IOException | InterruptedException e) {
-            e.printStackTrace();
+        Optional<ThirorosResponse> thirorosResponse = join();
+        if (thirorosResponse.isEmpty()) {
+            logger.info("no response from thiroros, aborting...");
+            throw new ThirorosException(ThirorosException.ThirorosExceptions.THIROROS_UNAVAILABLE);
         }
+
+        idFrom = thirorosResponse.get().getNodeId();
+        DistributedNode previousNode = thirorosResponse.get().getPreviousNode();
+        if (previousNode == null) {
+            idTo = idFrom - 1;
+            logger.info("no previous node");
+        } else {
+            Optional<DistributedNodeTopics> distributedNodeTopics = getTopics(previousNode);
+            if (distributedNodeTopics.isEmpty()) {
+                logger.info("no response from previous node, aborting...");
+                throw new DistributedNodeException(DistributedNodeException.DistributedNodeExceptions.DISTRIBUTED_NODE_UNAVAILABLE);
+            }
+            idTo = distributedNodeTopics.get().getToId();
+            Map<String, Set<Receivable>> topics = distributedNodeTopics.get().getTopics();
+            setTopics(topics);
+        }
+        logger.info("registering completed for node {}", nodeAddress);
     }
 
-    private Optional<ThirorosResponse> join() throws IOException, InterruptedException {
+    private Optional<ThirorosResponse> join() throws ThirorosException {
         DistributedNode distributedNode = new DistributedNode();
         distributedNode.setRemoteAddress(nodeAddress);
         logger.info("sending join request for node {} to thiroros", distributedNode);
-        HttpClient httpClient = HttpClient.newHttpClient();
-        HttpRequest httpRequest = HttpRequest.newBuilder(URI.create("http://" + thirorosAddress.getIp() + ":" + thirorosAddress.getPort() + "/join")).POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(distributedNode))).build();
-        //HttpResponse response = HttpBuilder.get(thirorosAddress.getIp(), thirorosAddress.getPort(), "join").body(mapper.writeValueAsString(distributedNode)).send();
-        HttpResponse<String> response = httpClient.send(httpRequest, java.net.http.HttpResponse.BodyHandlers.ofString());
+        try {
+            HttpClient httpClient = HttpClient.newHttpClient();
+            HttpRequest httpRequest = HttpRequest.newBuilder(URI.create("http://" + thirorosAddress.getIp() + ":" + thirorosAddress.getPort() + "/join")).POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(distributedNode))).build();
+            //HttpResponse response = HttpBuilder.get(thirorosAddress.getIp(), thirorosAddress.getPort(), "join").body(mapper.writeValueAsString(distributedNode)).send();
+            HttpResponse<String> response  = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            ThirorosResponse thirorosResponse = mapper.readValue(response.body(), ThirorosResponse.class);
+            ThirorosResponse.Response status = thirorosResponse.getThirorosResponse();
+            logger.info("thiroros response {}", status);
 
-        logger.info("thiroros response {}", response.body());
-        if (response.statusCode() == 200) {
-            return Optional.of(mapper.readValue(response.body(), ThirorosResponse.class));
+            if (status == ThirorosResponse.Response.REJECTED_INVALID_ID) {
+                throw new ThirorosException(ThirorosException.ThirorosExceptions.INVALID_ID);
+            } else if (status == ThirorosResponse.Response.REJECTED_SMALL_RANGE) {
+                throw new ThirorosException(ThirorosException.ThirorosExceptions.SMALL_RANGE);
+            }
+            return Optional.of(thirorosResponse);
+        } catch (IOException | InterruptedException e) {
+            e.printStackTrace();
+            return Optional.empty();
         }
-        return Optional.empty();
     }
 
-    private Optional<DistributedNodeTopics> getTopics(DistributedNode previousNode) throws IOException, InterruptedException {
+    private Optional<DistributedNodeTopics> getTopics(DistributedNode previousNode) throws DistributedNodeException {
         logger.info("sending get topics request to previous node {}", previousNode);
         HttpClient httpClient = HttpClient.newHttpClient();
         HttpRequest httpRequest = HttpRequest.newBuilder(URI.create("http://" + previousNode.getRemoteAddress().getIp() +  ":" + previousNode.getRemoteAddress().getPort() + "/distributedBroker/getTopics?id=" + idFrom)).build();
-        HttpResponse<String> response = httpClient.send(httpRequest, java.net.http.HttpResponse.BodyHandlers.ofString());
         //HttpResponse response = HttpBuilder.get(previousNode.getRemoteAddress().getIp(), previousNode.getRemoteAddress().getPort(), "/distributedBroker/getTopics?id=" + idFrom).send();
-        logger.info("get topics response {}", response.body());
-        if (response.statusCode() == 200) {
-            return Optional.of(mapper.readValue(response.body(), DistributedNodeTopics.class));
+
+        try {
+            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            DistributedNodeTopics distributedNodeTopics = mapper.readValue(response.body(), DistributedNodeTopics.class);
+            DistributedBrokerResponse status = distributedNodeTopics.getDistributedBrokerResponse();
+            logger.info("get topics response {}", status);
+
+            if (status == DistributedBrokerResponse.INVALID_ID) {
+                throw new DistributedNodeException(DistributedNodeException.DistributedNodeExceptions.INVALID_ID);
+            } else if (status == DistributedBrokerResponse.SERVER_ERROR) {
+                throw new DistributedNodeException(DistributedNodeException.DistributedNodeExceptions.SERVER_ERROR);
+            }
+            return Optional.of(distributedNodeTopics);
+        } catch (IOException | InterruptedException e) {
+            e.printStackTrace();
+            return Optional.empty();
         }
-        return Optional.empty();
     }
 
     private DistributedNode findPreviousNode(List<DistributedNode> distributedNodes) {

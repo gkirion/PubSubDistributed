@@ -2,6 +2,6 @@ package com.george.pubsub.distributed.util;
 
 public enum DistributedBrokerResponse {
 
-    OK, INVALIDATE_CACHE
+    OK, INVALID_ID, SERVER_ERROR
 
 }
